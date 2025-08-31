@@ -1,4 +1,5 @@
 
+
 // lib/api.ts
 import axios from 'axios';
 
@@ -52,6 +53,17 @@ export async function getStreamStatus(streamId: string) {
     return res.data;
   } catch (error: any) {
     console.error('Error getting stream status:', error);
+    throw error?.response?.data || error;
+  }
+}
+
+
+export async function getStreamStatusV2(streamId: string) {
+  try {
+    const res = await axios.get(`/api/stream?streamId=${encodeURIComponent(streamId)}`);
+    return res.data;
+  } catch (error: any) {
+    console.error('Error getting stream status (v2):', error);
     throw error?.response?.data || error;
   }
 }

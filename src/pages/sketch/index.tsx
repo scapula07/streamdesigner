@@ -53,13 +53,13 @@ export default function Sketch() {
         <section className="flex-1 bg-white rounded-lg shadow flex flex-col">
           {/* Canvas Area */}
           <div className="flex-1 flex items-center justify-center bg-blue-50 relative">
-            <CanvasDefault />
+            <CanvasDefault workspace={workspace}/>
           </div>
         </section>
 
         {/* Right: Mockup Preview Area */}
         <section className="w-1/2 bg-white rounded-lg shadow flex flex-col">
-          <Preview activeTab={activeTab} />
+          <Preview activeTab={activeTab} workspace={workspace}/>
           {/* Controls */}
           <div className="px-4 py-3 border-t flex flex-col gap-2">
             <label className="text-sm font-medium text-gray-700 mb-1">Prompt</label>

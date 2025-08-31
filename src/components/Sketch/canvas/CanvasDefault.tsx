@@ -1,21 +1,70 @@
-import React, { useRef, useState, useEffect } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { MdCloudUpload } from "react-icons/md";
-// import { createStream } from "@/lib/api";
-export default function CanvasDefault() {
+import { fabric } from "fabric";
+
+type Workspace = {
+  // expected to contain the whip endpoint (string). Adjust if your workspace structure differs.
+  whip_url: string;
+};
+export default function CanvasDefault({ workspace }: { workspace: Workspace }) {
+  const inputRef = useRef<HTMLInputElement | null>(null);
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const fabricRef = useRef<fabric.StaticCanvas | null>(null);
+
+  // WebRTC / streaming refs
+  const pcRef = useRef<RTCPeerConnection | null>(null);
+  const outgoingStreamRef = useRef<MediaStream | null>(null);
+  const whipResourceUrlRef = useRef<string | null>(null);
+  const silentAudioCtxRef = useRef<AudioContext | null>(null);
+  const silentAudioOscRef = useRef<OscillatorNode | null>(null);
+
+  // UI state
   const [fileUrl, setFileUrl] = useState<string | null>(null);
   const [fileType, setFileType] = useState<string | null>(null);
   const [dragActive, setDragActive] = useState(false);
-  const inputRef = useRef<HTMLInputElement>(null);
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const videoRef = useRef<HTMLVideoElement>(null);
-  // Remove streaming/WHIP logic and related state, as it's not used in this component
+  const [streaming, setStreaming] = useState(false);
+  const [streamLoading, setStreamLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  // --- File handling / UI ---
+  const handleClick = () => inputRef.current?.click();
 
   const handleFile = (file: File) => {
     if (!file) return;
-    if (!file.type.startsWith("image/") && !file.type.startsWith("video/")) return;
-    if (file.size > 4 * 1024 * 1024) return; // 4MB limit
+    if (!file.type.startsWith("image/") && !file.type.startsWith("video/")) {
+      setError("Unsupported file type (image/video only).");
+      return;
+    }
+    if (file.size > 4 * 1024 * 1024) {
+      setError("File too large (max 4MB).");
+      return;
+    }
+    setError(null);
     setFileType(file.type);
-    setFileUrl(URL.createObjectURL(file));
+    const url = URL.createObjectURL(file);
+    setFileUrl(url);
+
+    // small delay to allow canvas to draw then start streaming if desired
+    // but we won't auto-start streaming here; user must press Start Stream button
+  };
+
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files[0]) handleFile(e.target.files[0]);
+  };
+
+  const handleUrlInput = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === "Enter") {
+      const url = (e.target as HTMLInputElement).value.trim();
+      if (!url) return;
+      if (!url.match(/\.(jpeg|jpg|png|gif|webp|mp4|webm)$/i)) {
+        setError("URL must point to an image or video (jpeg/jpg/png/gif/webp/mp4/webm).");
+        return;
+      }
+      setError(null);
+      setFileUrl(url);
+      setFileType(url.match(/\.(mp4|webm)$/i) ? "video/mp4" : "image/png");
+    }
   };
 
   const handleDrop = (e: React.DragEvent<HTMLDivElement>) => {
@@ -26,113 +75,370 @@ export default function CanvasDefault() {
       handleFile(e.dataTransfer.files[0]);
     }
   };
-
   const handleDragOver = (e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault();
     e.stopPropagation();
     setDragActive(true);
   };
-
   const handleDragLeave = (e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault();
     e.stopPropagation();
     setDragActive(false);
   };
 
-  const handleClick = () => {
-    inputRef.current?.click();
-  };
-
-  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files[0]) {
-      handleFile(e.target.files[0]);
-    }
-  };
-
-  const handleUrlInput = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === "Enter") {
-      const url = (e.target as HTMLInputElement).value;
-      if (url.match(/\.(jpeg|jpg|png|gif|webp|mp4|webm)$/i)) {
-        setFileUrl(url);
-        setFileType(url.match(/\.(mp4|webm)$/i) ? "video" : "image");
-      }
-    }
-  };
-
-  // Draw image on canvas when fileUrl and fileType are set
+  // --- Canvas drawing (with fabric.js integration) ---
   useEffect(() => {
-    if (!fileUrl || !canvasRef.current) return;
     const canvas = canvasRef.current;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    if (fileType && fileType.startsWith("image/")) {
+    if (!canvas) return;
+
+    // Initialize fabric.js StaticCanvas if not already
+    if (!fabricRef.current) {
+      fabricRef.current = new fabric.StaticCanvas(canvas, {
+        backgroundColor: '#fff',
+        width: 350,
+        height: 350,
+        renderOnAddRemove: true,
+      });
+    }
+    const fabricCanvas = fabricRef.current;
+
+    // Helper to clear fabric and set size
+    const resetFabric = (w: number, h: number) => {
+      fabricCanvas.clear();
+      fabricCanvas.setWidth(w);
+      fabricCanvas.setHeight(h);
+      fabricCanvas.setBackgroundColor('#fff', fabricCanvas.renderAll.bind(fabricCanvas));
+    };
+
+    let intervalId: NodeJS.Timeout | null = null;
+    let rafId = 0;
+
+    if (fileUrl && fileType && fileType.startsWith("image/")) {
       const img = new window.Image();
+      img.crossOrigin = "anonymous";
       img.onload = () => {
-        // Fit image to canvas
+        const maxW = 350;
+        const maxH = 350;
         let w = img.width;
         let h = img.height;
-        const maxW = 350, maxH = 350;
         if (w > maxW || h > maxH) {
           const scale = Math.min(maxW / w, maxH / h);
-          w = w * scale;
-          h = h * scale;
+          w *= scale;
+          h *= scale;
         }
-        canvas.width = w;
-        canvas.height = h;
-        ctx.clearRect(0, 0, w, h);
-        ctx.drawImage(img, 0, 0, w, h);
+        resetFabric(w, h);
+        fabric.Image.fromURL(fileUrl, (fabricImg) => {
+          fabricImg.set({ left: 0, top: 0, selectable: false, evented: false });
+          fabricImg.scaleToWidth(w);
+          fabricImg.scaleToHeight(h);
+          fabricCanvas.add(fabricImg);
+          fabricCanvas.renderAll();
+        }, { crossOrigin: 'anonymous' });
+        // Redraw every second to keep stream active
+        intervalId = setInterval(() => fabricCanvas.renderAll(), 1000);
       };
+      img.onerror = () => setError("Failed to load image.");
       img.src = fileUrl;
+      return () => {
+        if (intervalId) clearInterval(intervalId);
+      };
     }
-  }, [fileUrl, fileType]);
 
-  // For video: draw current frame to canvas as video plays
-  useEffect(() => {
-    if (!fileUrl || !canvasRef.current || !(fileType && fileType.startsWith("video/"))) return;
-    const canvas = canvasRef.current;
-    const ctx = canvas.getContext("2d");
-    const video = videoRef.current;
-    if (!ctx || !video) return;
+    if (fileUrl && fileType && fileType.startsWith("video/")) {
+      const video = videoRef.current;
+      if (!video) return;
+      video.src = fileUrl;
+      video.muted = true;
+      video.playsInline = true;
 
-    let animationId: number;
-    const drawFrame = () => {
-      // Fit video to canvas
-      let w = video.videoWidth;
-      let h = video.videoHeight;
-      const maxW = 350, maxH = 350;
-      if (w > maxW || h > maxH) {
-        const scale = Math.min(maxW / w, maxH / h);
-        w = w * scale;
-        h = h * scale;
-      }
-      canvas.width = w;
-      canvas.height = h;
-      ctx.clearRect(0, 0, w, h);
-      ctx.drawImage(video, 0, 0, w, h);
-      animationId = requestAnimationFrame(drawFrame);
-    };
-    if (!video.paused) drawFrame();
-    video.addEventListener("play", drawFrame);
-    video.addEventListener("pause", () => cancelAnimationFrame(animationId));
-    video.addEventListener("ended", () => cancelAnimationFrame(animationId));
+      const drawFrame = () => {
+        if (!canvas || !video) return;
+        if (video.videoWidth === 0 || video.videoHeight === 0) {
+          rafId = requestAnimationFrame(drawFrame);
+          return;
+        }
+        const maxW = 350;
+        const maxH = 350;
+        let w = video.videoWidth;
+        let h = video.videoHeight;
+        if (w > maxW || h > maxH) {
+          const scale = Math.min(maxW / w, maxH / h);
+          w *= scale;
+          h *= scale;
+        }
+        resetFabric(w, h);
+        // Draw video frame to a temp canvas, then to fabric as image
+        const temp = document.createElement('canvas');
+        temp.width = w;
+        temp.height = h;
+        const tctx = temp.getContext('2d');
+        if (tctx) {
+          tctx.clearRect(0, 0, w, h);
+          tctx.drawImage(video, 0, 0, w, h);
+          fabric.Image.fromURL(temp.toDataURL(), (fabricImg) => {
+            fabricImg.set({ left: 0, top: 0, selectable: false, evented: false });
+            fabricImg.scaleToWidth(w);
+            fabricImg.scaleToHeight(h);
+            fabricCanvas.clear();
+            fabricCanvas.add(fabricImg);
+            fabricCanvas.renderAll();
+          });
+        }
+        rafId = requestAnimationFrame(drawFrame);
+      };
+      const onPlay = () => {
+        cancelAnimationFrame(rafId);
+        drawFrame();
+      };
+      video.addEventListener("play", onPlay);
+      video.addEventListener("pause", () => cancelAnimationFrame(rafId));
+      video.addEventListener("ended", () => cancelAnimationFrame(rafId));
+      if (!video.paused) onPlay();
+      video.play().catch(() => {});
+      return () => {
+        cancelAnimationFrame(rafId);
+        video.removeEventListener("play", onPlay);
+        if (intervalId) clearInterval(intervalId);
+      };
+    }
+
+    // If no file, just clear fabric
+    if (!fileUrl) {
+      resetFabric(350, 350);
+    }
+
     return () => {
-      cancelAnimationFrame(animationId);
-      video.removeEventListener("play", drawFrame);
-      video.removeEventListener("pause", () => cancelAnimationFrame(animationId));
-      video.removeEventListener("ended", () => cancelAnimationFrame(animationId));
+      if (intervalId) clearInterval(intervalId);
+      if (rafId) cancelAnimationFrame(rafId);
     };
   }, [fileUrl, fileType]);
+
+  // --- Silent audio track helper ---
+  const createSilentAudioTrack = async (): Promise<MediaStreamTrack | null> => {
+    try {
+      // Use WebAudio to create a silent stream (oscillator at 0 volume)
+      const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
+      silentAudioCtxRef.current = audioCtx;
+
+      // create silent oscillator -> gain 0
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      gain.gain.value = 0; // silent
+      osc.connect(gain);
+      const dst = audioCtx.createMediaStreamDestination();
+      gain.connect(dst);
+      osc.start();
+
+      // keep ref to stop later
+      silentAudioOscRef.current = osc;
+
+      const [track] = dst.stream.getAudioTracks();
+      return track;
+    } catch (err) {
+      console.warn("Could not create silent audio track:", err);
+      return null;
+    }
+  };
+
+  // --- Start Streaming (WHIP) ---
+  const startStreaming = async () => {
+    setError(null);
+    if (!workspace?.whip_url) {
+      setError("No WHIP URL configured on workspace.");
+      return;
+    }
+
+    const canvas = canvasRef.current;
+    if (!canvas) {
+      setError("Canvas not available to capture.");
+      return;
+    }
+
+    setStreamLoading(true);
+
+    try {
+      // 1) capture canvas stream (video)
+      const stream = canvas.captureStream(30); // fps 30
+      outgoingStreamRef.current = stream;
+
+      // 2) add silent audio track for compatibility
+      const audioTrack = await createSilentAudioTrack();
+      if (audioTrack) {
+        stream.addTrack(audioTrack);
+      }
+
+      // 3) create RTCPeerConnection
+      const pc = new RTCPeerConnection();
+      pcRef.current = pc;
+
+      // Optional: handle ICE connection state for debugging
+      pc.oniceconnectionstatechange = () => {
+        console.debug("ICE state:", pc.iceConnectionState);
+      };
+
+      // 4) add tracks to pc
+      stream.getTracks().forEach((t) => pc.addTrack(t, stream));
+
+      // 5) create a data channel (optional - not used further here)
+      try {
+        pc.createDataChannel("whip-control");
+      } catch (e) {
+        // ignore; not critical
+      }
+
+      // 6) create offer
+      const offer = await pc.createOffer();
+      await pc.setLocalDescription(offer);
+
+      // 7) POST offer.sdp to the WHIP endpoint (workspace.whip_url).
+      // WHIP expects application/sdp body. Some servers return Location header with resource URL.
+      const resp = await fetch(workspace.whip_url, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/sdp",
+        },
+        body: offer.sdp,
+      });
+
+      if (!resp.ok) {
+        const body = await resp.text().catch(() => "");
+        throw new Error(`WHIP POST failed: ${resp.status} ${resp.statusText} ${body}`);
+      }
+
+      // Save resource URL if WHIP returns Location header (recommended).
+      const location = resp.headers.get("Location");
+      if (location) {
+        whipResourceUrlRef.current = location;
+      }
+
+      // 8) read answer SDP from response body
+      const answerSDP = await resp.text();
+      if (!answerSDP) {
+        throw new Error("Empty answer SDP from WHIP server");
+      }
+
+      await pc.setRemoteDescription({ type: "answer", sdp: answerSDP });
+
+      setStreaming(true);
+      setStreamLoading(false);
+      console.log("Streaming started to WHIP URL");
+    } catch (err: any) {
+      console.error("Error starting streaming:", err);
+      setError(String(err?.message || err));
+      // cleanup partial resources
+      await stopStreamingInternal();
+      setStreamLoading(false);
+    }
+  };
+
+  // --- Stop (internal) ---
+  const stopStreamingInternal = async () => {
+    try {
+      // 1) if WHIP provided a resource URL, try DELETE it to stop ingestion
+      const resource = whipResourceUrlRef.current;
+      if (resource) {
+        try {
+          await fetch(resource, { method: "DELETE" });
+        } catch (err) {
+          // not fatal
+          console.warn("Failed to DELETE WHIP resource:", err);
+        }
+        whipResourceUrlRef.current = null;
+      }
+
+      // 2) close RTCPeerConnection and remove tracks
+      if (pcRef.current) {
+        try {
+          pcRef.current.getSenders().forEach((s) => {
+            try {
+              s.track?.stop();
+            } catch {}
+          });
+          pcRef.current.close();
+        } catch {}
+        pcRef.current = null;
+      }
+
+      // 3) stop outgoing stream tracks
+      if (outgoingStreamRef.current) {
+        outgoingStreamRef.current.getTracks().forEach((t) => {
+          try {
+            t.stop();
+          } catch {}
+        });
+        outgoingStreamRef.current = null;
+      }
+
+      // 4) stop silent audio oscillator and close AudioContext
+      if (silentAudioOscRef.current) {
+        try {
+          silentAudioOscRef.current.stop();
+        } catch {}
+        silentAudioOscRef.current = null;
+      }
+      if (silentAudioCtxRef.current) {
+        try {
+          silentAudioCtxRef.current.close();
+        } catch {}
+        silentAudioCtxRef.current = null;
+      }
+    } catch (err) {
+      console.warn("Error during stopStreamingInternal cleanup:", err);
+    } finally {
+      setStreaming(false);
+      setStreamLoading(false);
+    }
+  };
+
+  // --- Public Stop action ---
+  const stopStreaming = async () => {
+    setStreamLoading(true);
+    await stopStreamingInternal();
+    setStreamLoading(false);
+  };
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      // revoke object URL if created locally
+      if (fileUrl && fileUrl.startsWith("blob:")) {
+        URL.revokeObjectURL(fileUrl);
+      }
+      // stop streaming if active
+      stopStreamingInternal();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // --- Simple UI to remove loaded file ---
+  const removeFile = () => {
+    if (fileUrl && fileUrl.startsWith("blob:")) URL.revokeObjectURL(fileUrl);
+    setFileUrl(null);
+    setFileType(null);
+    // clear fabric canvas
+    // if (fabricRef.current) {
+    //   fabricRef.current.clear();
+    //   fabricRef.current.setBackgroundColor('#fff', fabricRef.current.renderAll.bind(fabricRef.current));
+    // }
+  };
 
   return (
     <div
-      className={`w-full h-full flex flex-col items-center justify-center border-2 border-dashed rounded-xl min-h-[400px] min-w-[350px] bg-white/80 transition-colors duration-200 ${dragActive ? "border-indigo-500 bg-indigo-50/80" : "border-gray-300"}`}
+      className={`w-full h-full flex flex-col items-center justify-center border-2 border-dashed rounded-xl min-h-[400px] min-w-[350px] bg-white/80 transition-colors duration-200 ${
+        dragActive ? "border-indigo-500 bg-indigo-50/80" : "border-gray-300"
+      }`}
       onDrop={handleDrop}
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
       onClick={handleClick}
-      style={{ cursor: fileUrl ? "default" : "pointer" }}
+      style={{ cursor: fileUrl ? "default" : "pointer", position: "relative" }}
     >
+      {streamLoading && (
+        <div className="absolute inset-0 flex items-center justify-center bg-white/85 z-20">
+          <span className="text-lg font-semibold text-gray-700">Processing...</span>
+        </div>
+      )}
+
       {!fileUrl ? (
         <>
           <MdCloudUpload className="text-4xl text-gray-400 mb-2" />
@@ -141,51 +447,62 @@ export default function CanvasDefault() {
             <span className="text-gray-400"> or drag</span>
           </div>
           <div className="text-xs text-gray-400 mt-1">PNG, JPEG, GIF, MP4, WEBM - Max. 4MB</div>
-          <input
-            ref={inputRef}
-            type="file"
-            accept="image/*,video/*"
-            className="hidden"
-            onChange={handleInputChange}
-          />
+          <input ref={inputRef} type="file" accept="image/*,video/*" className="hidden" onChange={handleInputChange} />
           <input
             type="text"
             placeholder="https://..."
             className="mt-6 w-72 px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-300 text-gray-700 bg-white shadow-sm"
             onKeyDown={handleUrlInput}
           />
+          {error && <div className="text-red-600 mt-2 text-sm">{error}</div>}
         </>
       ) : (
-        <div className="w-full h-full flex flex-col items-center justify-center">
-          {/* Canvas for image or video frame */}
-          <canvas ref={canvasRef} className="max-h-[350px] max-w-full rounded-lg shadow bg-black" />
-          {/* Hidden video for drawing frames to canvas */}
+        <div className="w-full h-full flex flex-col items-center justify-center p-4">
+          <canvas ref={canvasRef} className="max-h-[350px] max-w-full rounded-lg shadow bg-white" />
+
+          {/* hidden video element used for video->canvas draw */}
           {fileType && fileType.startsWith("video/") && (
-            <video
-              ref={videoRef}
-              src={fileUrl}
-              controls
-              className="hidden"
-              onPlay={() => {
-                // trigger useEffect
-                if (canvasRef.current && videoRef.current) {
-                  // nothing needed, handled by effect
-                }
-              }}
-            />
+            <video ref={videoRef} src={fileUrl} controls className="hidden" />
           )}
-          <button
-            className="mt-4 px-4 py-2 rounded-lg bg-gray-100 text-gray-700 font-semibold hover:bg-gray-200 transition"
-            onClick={e => {
-              e.stopPropagation();
-              setFileUrl(null);
-              setFileType(null);
-              if (canvasRef.current) {
-                const ctx = canvasRef.current.getContext("2d");
-                if (ctx) ctx.clearRect(0, 0, canvasRef.current.width, canvasRef.current.height);
-              }
-            }}
-          >Remove</button>
+
+          <div className="flex gap-3 mt-4">
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                removeFile();
+              }}
+              className="px-4 py-2 rounded-lg bg-gray-100 text-gray-700 font-semibold hover:bg-gray-200 transition"
+            >
+              Remove
+            </button>
+
+            {!streaming ? (
+              <button
+                onClick={async (e) => {
+                  e.stopPropagation();
+                  await startStreaming();
+                }}
+                className="px-4 py-2 rounded-lg bg-indigo-600 text-white font-semibold hover:bg-indigo-700 transition"
+                disabled={streamLoading}
+              >
+                Start Stream
+              </button>
+            ) : (
+              <button
+                onClick={async (e) => {
+                  e.stopPropagation();
+                  await stopStreaming();
+                }}
+                className="px-4 py-2 rounded-lg bg-red-600 text-white font-semibold hover:bg-red-700 transition"
+                disabled={streamLoading}
+              >
+                Stop Stream
+              </button>
+            )}
+          </div>
+
+          {error && <div className="text-red-600 mt-2 text-sm">{error}</div>}
+          {streaming && <div className="text-xs text-green-600 mt-2">Streaming to WHIP URL</div>}
         </div>
       )}
     </div>
