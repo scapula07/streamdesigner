@@ -5,8 +5,16 @@ import ToolbarMain from "./ToolbarMain";
 import ToolbarSecondary from "./ToolbarSecondary";
 import ToolbarRight from "./ToolbarRight";
 
-export default function Toolbar({workspace}: {workspace: any}) {
-  const [active, setActive] = useState("Draw");
+type ToolbarProps = {
+  workspace: any;
+  active: string;
+  setActive: (tool: string) => void;
+  imageLoaded: boolean;
+  onShapeAdd?: (shape: string) => void;
+  onAddText?: () => void;
+};
+
+export default function Toolbar({workspace, active, setActive, imageLoaded, onShapeAdd, onAddText}: ToolbarProps) {
   const [size, setSize] = useState(4);
   const [opacity, setOpacity] = useState(100);
 
@@ -15,9 +23,9 @@ export default function Toolbar({workspace}: {workspace: any}) {
       <div className="flex justify-between w-full px-2 mx-auto mt-4">
         <ToolbarLeft />
         <div className="flex-1 flex flex-col items-center">
-          <ToolbarMain active={active} setActive={setActive} />
+          <ToolbarMain active={active} setActive={setActive} onShapeAdd={onShapeAdd} onAddText={onAddText} />
           <div className="h-2" />
-          <ToolbarSecondary active={active} setActive={setActive} size={size} setSize={setSize} opacity={opacity} setOpacity={setOpacity} />
+          {imageLoaded && <ToolbarSecondary active={active} setActive={setActive} />}
         </div>
         <ToolbarRight />
       </div>

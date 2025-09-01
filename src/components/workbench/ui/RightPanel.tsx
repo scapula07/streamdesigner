@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect } from "react";
+import { getStreamStatusV2 } from "@/lib/api";
 
 export default function RightPanel({workspace}: {workspace: any}) {
   const [expanded, setExpanded] = useState(false);
@@ -7,12 +8,39 @@ export default function RightPanel({workspace}: {workspace: any}) {
   const iframeHeight = 200;
   const iframeWidth = '100%';
 
+  // --- Stream status polling (copied from Preview) ---
+  const [streamStatus, setStreamStatus] = useState<any>(null);
   useEffect(() => {
-    if (expanded && panelRef.current) {
-      const rect = panelRef.current.getBoundingClientRect();
-      setPanelLeft(rect.right);
+    let interval: NodeJS.Timeout;
+    let stopped = false;
+    async function poll() {
+      if (workspace?.stream_id) {
+        try {
+          const status = await getStreamStatusV2(workspace.stream_id);
+          if (!stopped) setStreamStatus(status);
+        } catch (err) {
+          if (!stopped) setStreamStatus(null);
+        }
+      }
     }
-  }, [expanded]);
+    poll();
+    interval = setInterval(poll, 30000);
+    return () => {
+      stopped = true;
+      clearInterval(interval);
+    };
+  }, [workspace?.stream_id]);
+
+  // Determine live/offline using absence of gateway_status.error_message
+  const isLive = !!(
+    streamStatus &&
+    streamStatus.data &&
+    streamStatus.data.gateway_status &&
+    !streamStatus.data.gateway_status.error_message
+  );
+
+  // Console bar state (collapsed/expanded)
+  const [consoleOpen, setConsoleOpen] = useState(false);
   return (
     <aside ref={panelRef} className="w-80 bg-white rounded-2xl shadow-xl flex flex-col border border-gray-200 overflow-hidden " style={{ minWidth: 320, maxWidth: 360 }}>
       {/* Header */}
@@ -22,61 +50,134 @@ export default function RightPanel({workspace}: {workspace: any}) {
           <svg width="20" height="20" fill="none" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" fill="#E5E7EB"/><path d="M12 8v4l2 2" stroke="#6B7280" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
         </button>
       </div>
-      {/* Tabs */}
-      <div className="flex flex-col items-center  py-1 mx-4 rounded-xl mb-4 mt-1">
-        {workspace?.output_playback_id && (
-          <div className="w-full flex flex-col items-center my-2">
-            <div className="w-full relative">
-              <iframe
-                src={`https://lvpr.tv/?v=${workspace.output_playback_id}`}
-                className="rounded-lg border-0 w-full transition-all duration-300"
-                style={{ aspectRatio: '16/9', height: 200, minHeight: 120, maxHeight: 480 }}
-                allow="autoplay; encrypted-media"
-                allowFullScreen
-              ></iframe>
-              <div className="relative group">
-                <button
-                  className="absolute right-2 bottom-2 bg-white/80 hover:bg-white text-gray-700 border border-gray-200 rounded-full p-1 shadow transition"
-                  style={{ zIndex: 2 }}
-                  onClick={() => setExpanded(e => !e)}
-                  aria-label={expanded ? 'Collapse video' : 'Expand video'}
-                >
-                  {expanded ? (
-                    <svg width="20" height="20" fill="none" viewBox="0 0 24 24"><path d="M15 19l-7-7 7-7" stroke="#6366F1" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
-                  ) : (
-                    <svg width="20" height="20" fill="none" viewBox="0 0 24 24"><path d="M9 5l7 7-7 7" stroke="#6366F1" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
-                  )}
-                </button>
-                <div className="pointer-events-none absolute bottom-10 right-0 z-50 opacity-0 group-hover:opacity-100 transition-opacity bg-gray-900 text-white text-xs rounded px-3 py-2 shadow-lg whitespace-nowrap min-w-max">
-                  {expanded
-                    ? 'Collapse video overlay (return to sidebar)'
-                    : 'Expand video overlay (show at top right of screen)'}
-                </div>
+      {/* Stream status overlay (like Preview) */}
+      {workspace?.output_playback_id && (
+        <div className="w-full flex flex-col items-center my-2">
+          <div className="w-full relative px-3 pb-2 pt-1">
+            {/* Overlay status tab inside player */}
+            <div className="absolute top-2 left-2 z-20 flex gap-2 px-3 py-1 items-center ">
+              <span className="text-white text-sm font-light">Stream is <span className={`px-2 py-0.5 text-xs ${isLive ? 'text-green-400' : 'text-red-400'}`}>{isLive ? 'LIVE' : 'OFFLINE'}</span></span>
+              <button
+                className="ml-2 px-2 py-0.5 rounded text-xs bg-white/30 backdrop-blur-md text-green-600 font-semibold bg-gray-100 hover:bg-gray-200"
+                onClick={() => setConsoleOpen(v => !v)}
+              >
+                Console
+              </button>
+            </div>
+            <iframe
+              src={`https://lvpr.tv/?v=${workspace.output_playback_id}`}
+              className="rounded-lg border-0 w-full transition-all duration-300"
+              style={{ aspectRatio: '16/9', height: 200, minHeight: 120, maxHeight: 480 }}
+              allow="autoplay; encrypted-media"
+              allowFullScreen
+            ></iframe>
+            <div className="relative group">
+              <button
+                className="absolute right-2 bottom-2 bg-white/80 hover:bg-white text-gray-700 border border-gray-200 rounded-full p-1 shadow transition"
+                style={{ zIndex: 2 }}
+                onClick={() => setExpanded(e => !e)}
+                aria-label={expanded ? 'Collapse video' : 'Expand video'}
+              >
+                {expanded ? (
+                  <svg width="20" height="20" fill="none" viewBox="0 0 24 24"><path d="M15 19l-7-7 7-7" stroke="#6366F1" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                ) : (
+                  <svg width="20" height="20" fill="none" viewBox="0 0 24 24"><path d="M9 5l7 7-7 7" stroke="#6366F1" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                )}
+              </button>
+              <div className="pointer-events-none absolute bottom-10 right-0 z-50 opacity-0 group-hover:opacity-100 transition-opacity bg-gray-900 text-white text-xs rounded px-3 py-2 shadow-lg whitespace-nowrap min-w-max">
+                {expanded
+                  ? 'Collapse video overlay (return to sidebar)'
+                  : 'Expand video overlay (show at top right of screen)'}
               </div>
             </div>
-            {expanded && (
-              <div
-                className="fixed z-[1050] flex flex-col items-center"
-                style={{ top: 88, right: 24, minWidth: 400, width: 640, maxWidth: '98vw', pointerEvents: 'auto' }}
-              >
-                <div className="relative bg-black rounded-2xl shadow-2xl flex flex-col items-center border-4 border-white overflow-hidden" style={{ width: '100%', height: 480, pointerEvents: 'auto' }}>
-                  <iframe
-                    src={`https://lvpr.tv/?v=${workspace.output_playback_id}`}
-                    className="rounded-2xl border-0 w-full h-full transition-all duration-300 bg-black"
-                    style={{ aspectRatio: '1/1', minHeight: 320, maxHeight: 600, pointerEvents: 'none' }}
-                    allow="autoplay; encrypted-media"
-                    allowFullScreen
-                  ></iframe>
-                  <button
-                    className="absolute bottom-4 right-4 bg-white/80 hover:bg-white text-gray-700 border border-gray-200 rounded-full p-1 shadow transition"
-                    style={{ zIndex: 2, pointerEvents: 'auto' }}
-                    onClick={() => setExpanded(false)}
-                    title={'Collapse'}
-                  >
-                    <svg width="20" height="20" fill="none" viewBox="0 0 24 24"><path d="M15 19l-7-7 7-7" stroke="#6366F1" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
-                  </button>
-                </div>
+          </div>
+          {expanded && (
+            <div
+              className="fixed z-[1050] flex flex-col items-center"
+              style={{ top: 88, right: 24, minWidth: 400, width: 640, maxWidth: '98vw', pointerEvents: 'auto' }}
+            >
+              <div className="relative bg-black rounded-2xl shadow-2xl flex flex-col items-center border-4 border-white overflow-hidden" style={{ width: '100%', height: 480, pointerEvents: 'auto' }}>
+                <iframe
+                  src={`https://lvpr.tv/?v=${workspace.output_playback_id}`}
+                  className="rounded-2xl border-0 w-full h-full transition-all duration-300 bg-black"
+                  style={{ aspectRatio: '1/1', minHeight: 320, maxHeight: 600, pointerEvents: 'none' }}
+                  allow="autoplay; encrypted-media"
+                  allowFullScreen
+                ></iframe>
+                <button
+                  className="absolute bottom-4 right-4 bg-white/80 hover:bg-white text-gray-700 border border-gray-200 rounded-full p-1 shadow transition"
+                  style={{ zIndex: 2, pointerEvents: 'auto' }}
+                  onClick={() => setExpanded(false)}
+                  title={'Collapse'}
+                >
+                  <svg width="20" height="20" fill="none" viewBox="0 0 24 24"><path d="M15 19l-7-7 7-7" stroke="#6366F1" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                </button>
               </div>
+            </div>
+          )}
+        </div>
+      )}
+      {/* Stream console bar at bottom right inside panel */}
+      <div
+        className={`transition-all duration-300 ${consoleOpen ? 'h-40' : 'h-10'} bg-gray-50 border-t border-gray-200 flex flex-col justify-end absolute right-0 bottom-0 z-30 w-full`}
+        style={{ minWidth: 320, maxWidth: 360 }}
+      >
+        <div className="flex items-center px-4 py-2 cursor-pointer select-none" onClick={() => setConsoleOpen(v => !v)}>
+          <span className="font-semibold text-xs mr-2">Stream Console</span>
+          <span className={`text-xs font-semibold ${isLive ? 'text-green-600' : 'text-red-600'}`}>{isLive ? 'LIVE' : 'OFFLINE'}</span>
+          <span className="ml-auto text-gray-400">{consoleOpen ? (
+            <svg width="18" height="18" fill="none" viewBox="0 0 24 24"><path d="M6 15l6-6 6 6" stroke="#6366F1" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
+          ) : (
+            <svg width="18" height="18" fill="none" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6" stroke="#6366F1" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
+          )}</span>
+        </div>
+        {consoleOpen && (
+          <div className="px-4 pb-2 pt-0 text-xs -mt-10 overflow-y-auto" style={{ maxHeight: 120 }}>
+            {streamStatus && streamStatus.data ? (
+              <div>
+                <div className="mb-1">
+                  <span className="font-semibold">Status: </span>
+                  <span className={isLive ? 'text-green-600' : 'text-red-600'}>
+                    {isLive ? 'LIVE (Stream is online and healthy)' : 'OFFLINE (Stream is not active)'}
+                  </span>
+                </div>
+                {streamStatus.data.gateway_status?.error_message && (
+                  <div className="mb-1">
+                    <span className="font-semibold text-red-600">Error: </span>
+                    <span className="text-red-600">{streamStatus.data.gateway_status.error_message}</span>
+                  </div>
+                )}
+                {streamStatus.data.ingest_metrics && (
+                  <div className="mb-1">
+                    <span className="font-semibold">Connection Quality: </span>
+                    <span>{streamStatus.data.ingest_metrics.stats?.conn_quality || 'Unknown'}</span>
+                  </div>
+                )}
+                {typeof streamStatus.data.input_status?.fps === 'number' && (
+                  <div className="mb-1">
+                    <span className="font-semibold">Input FPS: </span>
+                    <span>{streamStatus.data.input_status.fps}</span>
+                  </div>
+                )}
+                {streamStatus.data.orchestrator_info?.address && (
+                  <div className="mb-1">
+                    <span className="font-semibold">Server: </span>
+                    <span>{streamStatus.data.orchestrator_info.address}</span>
+                  </div>
+                )}
+                {streamStatus.data.stream_id && (
+                  <div className="mb-1">
+                    <span className="font-semibold">Stream ID: </span>
+                    <span>{streamStatus.data.stream_id}</span>
+                  </div>
+                )}
+                <details className="mt-2">
+                  <summary className="cursor-pointer text-xs text-gray-500 underline">Show technical details</summary>
+                  <pre className="text-xs mt-1 bg-gray-100 p-2 rounded border border-gray-200">{JSON.stringify(streamStatus, null, 2)}</pre>
+                </details>
+              </div>
+            ) : (
+              <span>No stream status available.</span>
             )}
           </div>
         )}

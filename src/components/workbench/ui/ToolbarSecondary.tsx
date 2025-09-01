@@ -1,51 +1,43 @@
 import React from "react";
 
-export default function ToolbarSecondary({ active, setActive, size, setSize, opacity, setOpacity }: {
+export default function ToolbarSecondary({ active, setActive }: {
   active: string,
   setActive: (tool: string) => void,
-  size: number,
-  setSize: (n: number) => void,
-  opacity: number,
-  setOpacity: (n: number) => void,
 }) {
   return (
-    <div className="flex items-center justify-center gap-3 px-2 py-2 bg-white border border-t-0 border-gray-200 rounded-b-xl shadow-sm max-w-xl mx-auto">
-      <button
-        className={`flex items-center justify-center w-8 h-8 rounded-lg text-lg font-semibold transition border-2 ${
-          active === "Draw"
-            ? "border-indigo-600 bg-indigo-50 text-indigo-700"
-            : "border-transparent text-gray-700 hover:bg-gray-100"
-        }`}
-        onClick={() => setActive("Draw")}
-      >
-        {/* Draw icon */}
-        <svg width="20" height="20" fill="none" viewBox="0 0 24 24"><path d="M19 11l-6 6-4-4" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/><path d="M5 19h14" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>
-      </button>
-      <span className="text-xs text-gray-500 ml-2">Size</span>
-      <input
-        type="range"
-        min={1}
-        max={32}
-        value={size}
-        onChange={e => setSize(Number(e.target.value))}
-        className="accent-indigo-600 mx-2"
-        style={{ width: 100 }}
-      />
-      <span className="text-xs text-gray-700 w-8 text-center">{size}px</span>
-      <span className="text-xs text-gray-500 ml-4">Opacity</span>
-      <input
-        type="range"
-        min={0}
-        max={100}
-        value={opacity}
-        onChange={e => setOpacity(Number(e.target.value))}
-        className="accent-indigo-600 mx-2"
-        style={{ width: 100 }}
-      />
-      <span className="text-xs text-gray-700 w-10 text-center">{opacity}%</span>
-      <button className="ml-4 w-8 h-8 flex items-center justify-center rounded hover:bg-gray-100 text-gray-500">
-        <svg width="18" height="18" fill="none" viewBox="0 0 24 24"><path d="M12 6v6l4 2" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
-      </button>
+    <div className="flex items-center justify-center gap-6 px-6 py-2 bg-white border border-t-0 border-gray-200 rounded-b-xl shadow-sm" style={{ minWidth: 520, maxWidth: 700, margin: '0 auto' }}>
+      {/* Only streaming, record, screenshot icons remain */}
+      {/* Streaming Controls */}
+      <div className="flex items-center gap-10 w-full justify-center">
+        <button
+          className="min-w-[110px] h-10 flex items-center justify-start rounded hover:bg-indigo-50 text-indigo-600 px-2"
+          title="Start/Stop Streaming"
+          onClick={() => setActive(active === "Stream" ? "" : "Stream")}
+        >
+          {active === "Stream" ? (
+            <svg width="22" height="22" fill="none" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2" fill="currentColor"/></svg>
+          ) : (
+            <svg width="22" height="22" fill="none" viewBox="0 0 24 24"><polygon points="6,4 20,12 6,20" fill="currentColor"/></svg>
+          )}
+          <span className="text-xs text-slate-600 ml-2">Stream</span>
+        </button>
+        <button
+          className="min-w-[110px] h-10 flex items-center justify-start rounded hover:bg-red-50 text-red-500 px-2"
+          title="Record"
+          onClick={() => setActive(active === "Record" ? "" : "Record")}
+        >
+          <svg width="22" height="22" fill="none" viewBox="0 0 24 24"><circle cx="12" cy="12" r="6" fill="currentColor"/></svg>
+          <span className="text-xs text-slate-600 ml-2">Record</span>
+        </button>
+        <button
+          className="min-w-[110px] h-10 flex items-center justify-start rounded hover:bg-green-50 text-green-600 px-2"
+          title="Screenshot"
+          onClick={() => setActive(active === "Screenshot" ? "" : "Screenshot")}
+        >
+          <svg width="22" height="22" fill="none" viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="3" stroke="currentColor" strokeWidth="2"/><circle cx="12" cy="12" r="3" fill="currentColor"/></svg>
+          <span className="text-xs text-slate-600 ml-2">Screenshot</span>
+        </button>
+      </div>
     </div>
   );
 }

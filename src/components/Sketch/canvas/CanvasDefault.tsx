@@ -117,14 +117,15 @@ export default function CanvasDefault({ workspace }: { workspace: Workspace }) {
       const img = new window.Image();
       img.crossOrigin = "anonymous";
       img.onload = () => {
-        const maxW = 350;
-        const maxH = 350;
+        // Responsive max size: fit within parent, but never exceed 90vw/70vh
+        const maxW = Math.min(700, window.innerWidth * 0.9);
+        const maxH = Math.min(500, window.innerHeight * 0.7);
         let w = img.width;
         let h = img.height;
         if (w > maxW || h > maxH) {
           const scale = Math.min(maxW / w, maxH / h);
-          w *= scale;
-          h *= scale;
+          w = Math.round(w * scale);
+          h = Math.round(h * scale);
         }
         resetFabric(w, h);
         fabric.Image.fromURL(fileUrl, (fabricImg) => {
@@ -431,7 +432,14 @@ export default function CanvasDefault({ workspace }: { workspace: Workspace }) {
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
       onClick={handleClick}
-      style={{ cursor: fileUrl ? "default" : "pointer", position: "relative" }}
+      style={{
+        cursor: fileUrl ? "default" : "pointer",
+        position: "relative",
+        overflow: "auto",
+        justifyContent: "center",
+        alignItems: "center",
+        display: "flex",
+      }}
     >
       {streamLoading && (
         <div className="absolute inset-0 flex items-center justify-center bg-white/85 z-20">
@@ -458,7 +466,18 @@ export default function CanvasDefault({ workspace }: { workspace: Workspace }) {
         </>
       ) : (
         <div className="w-full h-full flex flex-col items-center justify-center p-4">
-          <canvas ref={canvasRef} className="max-h-[350px] max-w-full rounded-lg shadow bg-white" />
+          <canvas
+            ref={canvasRef}
+            className="rounded-lg shadow bg-white"
+            style={{
+              maxWidth: "90vw",
+              maxHeight: "70vh",
+              width: "auto",
+              height: "auto",
+              display: "block",
+              margin: "0 auto"
+            }}
+          />
 
           {/* hidden video element used for video->canvas draw */}
           {fileType && fileType.startsWith("video/") && (
