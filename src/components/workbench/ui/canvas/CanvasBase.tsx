@@ -1,15 +1,29 @@
-import React, { useRef, useEffect } from 'react';
+import React, { useRef, useEffect, useState } from 'react';
 import { fabric } from 'fabric';
 
 type CanvasBaseProps = {
   onCanvasInitialized: (canvas: fabric.Canvas) => void;
   isDrawingMode?: boolean;
   className?: string;
+  onObjectModified?: () => void;
+  onObjectAdded?: () => void;
+  onObjectRemoved?: () => void;
+  onPathCreated?: () => void;
 };
 
-export function CanvasBase({ onCanvasInitialized, isDrawingMode = false, className = '' }: CanvasBaseProps) {
+export function CanvasBase({ 
+  onCanvasInitialized, 
+  isDrawingMode = false, 
+  className = '',
+  onObjectModified,
+  onObjectAdded,
+  onObjectRemoved,
+  onPathCreated,
+}: CanvasBaseProps) {
   const canvasElRef = useRef<HTMLCanvasElement | null>(null);
+  const [canvas, setCanvas] = useState<fabric.Canvas | null>(null);
 
+  // Initial canvas setup
   useEffect(() => {
     if (!canvasElRef.current) return;
 
@@ -30,6 +44,7 @@ export function CanvasBase({ onCanvasInitialized, isDrawingMode = false, classNa
       isDrawingMode: isDrawingMode,
     });
 
+    setCanvas(canvas);
     onCanvasInitialized(canvas);
 
     return () => {
@@ -39,7 +54,30 @@ export function CanvasBase({ onCanvasInitialized, isDrawingMode = false, classNa
         console.warn('Error disposing canvas:', err);
       }
     };
-  }, [onCanvasInitialized, isDrawingMode]);
+  }, [onCanvasInitialized]);
+
+  // Handle drawing mode changes
+  useEffect(() => {
+    if (!canvas) return;
+    canvas.isDrawingMode = isDrawingMode;
+  }, [canvas, isDrawingMode]);
+
+  // Event handlers
+  useEffect(() => {
+    if (!canvas) return;
+
+    if (onObjectModified) canvas.on('object:modified', onObjectModified);
+    if (onObjectAdded) canvas.on('object:added', onObjectAdded);
+    if (onObjectRemoved) canvas.on('object:removed', onObjectRemoved);
+    if (onPathCreated) canvas.on('path:created', onPathCreated);
+
+    return () => {
+      if (onObjectModified) canvas.off('object:modified', onObjectModified);
+      if (onObjectAdded) canvas.off('object:added', onObjectAdded);
+      if (onObjectRemoved) canvas.off('object:removed', onObjectRemoved);
+      if (onPathCreated) canvas.off('path:created', onPathCreated);
+    };
+  }, [canvas, onObjectModified, onObjectAdded, onObjectRemoved, onPathCreated]);
 
   return <canvas ref={canvasElRef} id="fabricCanvas" className={className} />;
 }

@@ -25,7 +25,7 @@ export default function CanvasArea({
   setImageLoaded: (v: boolean) => void,
   setCanUndo: (can: boolean) => void,
   setCanRedo: (can: boolean) => void,
-  setUndoRedoState: (state: { onUndo?: () => void, onRedo?: () => void, onAddText?: () => void }) => void
+  setUndoRedoState: (state: { onUndo?: () => void, onRedo?: () => void }) => void
 }) {
     // Context menu position and visibility state
     console.log(active,"active")
@@ -144,13 +144,13 @@ type MenuState = {
         setSelectedObj(obj);
         showMenuForObject(obj);
         canvas.renderAll(); // Force an immediate canvas update
+        
         // Stop event propagation to prevent document click from immediately hiding the menu
         if (e.e) {
           e.e.stopPropagation();
         }
       }
     };
-
     // Hide menu only if user clicks outside the canvas area
     const handleClear = () => {
       setMenuState(s => ({ ...s, visible: false }));
@@ -242,7 +242,31 @@ type MenuState = {
       }
     }
   };
+  // Add text to canvas
+  const handleAddText = () => {
+     console.log("Adding text");
+    const canvas = canvasRef.current;
+    if (!canvas) return;
 
+    // Create a new IText object for editable text
+    const text = new fabric.IText('Double click to edit', {
+      left: canvas.width! / 2 - 100,
+      top: canvas.height! / 2 - 20,
+      fontSize: 24,
+      fill: '#111827',
+      fontFamily: 'Inter, sans-serif',
+      padding: 8,
+      editingBorderColor: '#6366f1',
+      selectable: true,
+      hasControls: true,
+    });
+
+    canvas.add(text);
+    canvas.setActiveObject(text);
+    text.enterEditing();
+    canvas.requestRenderAll();
+    saveCanvasState();
+  };
 
   // Add shape to canvas
   const handleAddShape = (shape: string) => {
@@ -324,9 +348,6 @@ type MenuState = {
       canvas.add(obj);
       canvas.setActiveObject(obj);
       canvas.requestRenderAll();
-      
-      // Consider canvas loaded when shape is added
-      setImageLoaded(true);
     }
   };
   
@@ -680,49 +701,16 @@ type MenuState = {
 
   // Effect to handle drawing mode based on active tool
   useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-
-    if (active === 'Draw') {
+    if (active === 'Draw' || active === 'Erase') {
       toggleDrawingMode(true);
-    } else {
+      setIsEraser(active === 'Erase');
+    } else if (isDrawingMode) {
       toggleDrawingMode(false);
+      setIsEraser(false);
     }
   }, [active]);
 
-  // Handle adding text to canvas
-const handleAddText = () => {
-    console.log("Adding text to canvas");
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    
-    // Create a new IText object for editable text
-    const text = new fabric.IText('Double click to edit', {
-      left: (canvas.getWidth() || 0) / 2,
-      top: (canvas.getHeight() || 0) / 2,
-      fontSize: 24,
-      fill: '#111827',
-      fontFamily: 'Inter, sans-serif',
-      padding: 8,
-      editingBorderColor: '#6366f1',
-      selectable: true,
-      hasControls: true,
-      originX: 'center',
-      originY: 'center'
-    });
-
-    // Add the text to canvas and activate it
-    canvas.add(text);
-    canvas.setActiveObject(text);
-    text.enterEditing();
-    canvas.requestRenderAll();
-    
-    // Consider canvas loaded when text is added
-    setImageLoaded(true);
-    
-    // Save state after adding text
-    saveCanvasState();
-  };  // Save canvas state after each change
+  // Save canvas state after each change
   const saveCanvasState = () => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -853,8 +841,7 @@ const handleAddText = () => {
   useEffect(() => {
     setUndoRedoState({
       onUndo: handleUndo,
-      onRedo: handleRedo,
-      onAddText: handleAddText
+      onRedo: handleRedo
     });
   }, [setUndoRedoState]);
 
@@ -870,13 +857,9 @@ const handleAddText = () => {
     // Save initial state
     saveCanvasState();
 
-    // Listen for various modification events and update image loaded state
+    // Listen for various modification events
     const saveState = () => {
       console.log('Canvas modification detected');
-      // If anything is added to canvas, consider it "loaded"
-      if (canvas.getObjects().length > 0) {
-        setImageLoaded(true);
-      }
       saveCanvasState();
     };
 
@@ -1073,7 +1056,7 @@ const handleAddText = () => {
           </div>
         )}
 
-        {!imageLoaded && (
+        {!imageLoaded && (!canvasRef.current?.getObjects().length) && (
           <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-20">
             <div
               className={`bg-white px-8 py-8 rounded-2xl shadow-xl min-w-[320px] max-w-[360px] flex flex-col items-center  transition-all duration-200 pointer-events-auto ${
@@ -1109,6 +1092,7 @@ const handleAddText = () => {
     </>
   );
 }
+
 
 
 

@@ -22,7 +22,7 @@ export default function Workbench({workspace}: {workspace: any}) {
     setActive("Text"); // Switch to text mode
     if (undoRedoState.onAddText) {
       undoRedoState.onAddText();
-    }
+      }
   };
   return (
     <div className="flex flex-col min-h-screen bg-white">

@@ -3,6 +3,7 @@ import { getStreamStatusV2 } from "@/lib/api";
 
 export default function RightPanel({workspace}: {workspace: any}) {
   const [expanded, setExpanded] = useState(false);
+  const [controlNetsExpanded, setControlNetsExpanded] = useState(false);
   const panelRef = useRef<HTMLDivElement>(null);
   const [panelLeft, setPanelLeft] = useState<number | null>(null);
   const iframeHeight = 200;
@@ -120,7 +121,7 @@ export default function RightPanel({workspace}: {workspace: any}) {
       {/* Stream console bar at bottom right inside panel */}
       <div
         className={`transition-all duration-300 ${consoleOpen ? 'h-40' : 'h-10'} bg-gray-50 border-t border-gray-200 flex flex-col justify-end absolute right-0 bottom-0 z-30 w-full`}
-        style={{ minWidth: 320, maxWidth: 360 }}
+        style={{ minWidth: 320, maxWidth: 360, marginTop: 0, paddingTop: 0 }}
       >
         <div className="flex items-center px-4 py-2 cursor-pointer select-none" onClick={() => setConsoleOpen(v => !v)}>
           <span className="font-semibold text-xs mr-2">Stream Console</span>
@@ -182,7 +183,111 @@ export default function RightPanel({workspace}: {workspace: any}) {
           </div>
         )}
       </div>
-      <div className="flex-1 overflow-y-auto px-5 pb-5">
+      <div className="flex-1 overflow-y-auto px-5 pb-5" style={{paddingBottom: 0, marginBottom: 0}}>
+        {/* Settings Controls */}
+        <div className="space-y-4 mb-6">
+          {/* Control Nets */}
+          <div>
+            <div className="flex items-center justify-between" onClick={() => setControlNetsExpanded(!controlNetsExpanded)}>
+              <label className="flex items-center text-sm text-gray-700">
+                Control Nets
+                <button className="ml-1 text-gray-400 hover:text-gray-600">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="2"/><path d="M12 16v-4M12 8h.01" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>
+                </button>
+              </label>
+              <div className="flex items-center gap-2">
+                <svg 
+                    width="16" 
+                    height="16" 
+                    viewBox="0 0 24 24" 
+                    fill="none" 
+                    className={`transform transition-transform ${controlNetsExpanded ? 'rotate-180' : ''}`}
+                    >
+                    <path d="M6 9l6 6 6-6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                </svg>
+              </div>
+            </div>
+
+            
+            {/* Nested Controls */}
+            <div className={`pl-4 mt-2 space-y-4 ${controlNetsExpanded ? '' : 'hidden'}`}>
+              {/* Pose */}
+              <div>
+                <div className="flex items-center justify-between">
+                  <label className="flex items-center text-sm text-gray-700">Pose</label>
+                  <span className="text-sm text-gray-600">0.14</span>
+                </div>
+                <input type="range" min="0" max="1" step="0.01" defaultValue="0.14"
+                  className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer" />
+              </div>
+
+              {/* RED */}
+              <div>
+                <div className="flex items-center justify-between">
+                  <label className="flex items-center text-sm text-gray-700">RED</label>
+                  <span className="text-sm text-gray-600">0.27</span>
+                </div>
+                <input type="range" min="0" max="1" step="0.01" defaultValue="0.27"
+                  className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer" />
+              </div>
+
+              {/* Canny */}
+              <div>
+                <div className="flex items-center justify-between">
+                  <label className="flex items-center text-sm text-gray-700">Canny</label>
+                  <span className="text-sm text-gray-600">0.34</span>
+                </div>
+                <input type="range" min="0" max="1" step="0.01" defaultValue="0.34"
+                  className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer" />
+              </div>
+
+              {/* Depth */}
+              <div>
+                <div className="flex items-center justify-between">
+                  <label className="flex items-center text-sm text-gray-700">Depth</label>
+                  <span className="text-sm text-gray-600">0.66</span>
+                </div>
+                <input type="range" min="0" max="1" step="0.01" defaultValue="0.66"
+                  className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer" />
+              </div>
+            </div>
+          </div>
+
+          {/* Denoise */}
+          <div>
+            <div className="flex items-center justify-between mb-2">
+              <label className="flex items-center text-sm text-gray-700">
+                Denoise
+                <button className="ml-1 text-gray-400 hover:text-gray-600">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="2"/><path d="M12 16v-4M12 8h.01" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>
+                </button>
+              </label>
+              <div className="flex gap-2">
+                <button className="p-1 bg-gray-100 rounded">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M4 6h16M4 12h16M4 18h16"/></svg>
+                </button>
+                <button className="p-1 bg-gray-100 rounded">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M4 4h4v4H4zM12 4h4v4h-4zM4 12h4v4H4zM12 12h4v4h-4z"/></svg>
+                </button>
+              </div>
+            </div>
+            <div className="grid grid-cols-3 gap-4">
+              <div className="text-center">
+                <div className="text-xs text-gray-500 mb-1">X</div>
+                <input type="number" value="2" className="w-full px-2 py-1 text-sm border rounded" />
+              </div>
+              <div className="text-center">
+                <div className="text-xs text-gray-500 mb-1">Y</div>
+                <input type="number" value="4" className="w-full px-2 py-1 text-sm border rounded" />
+              </div>
+              <div className="text-center">
+                <div className="text-xs text-gray-500 mb-1">Z</div>
+                <input type="number" value="6" className="w-full px-2 py-1 text-sm border rounded" />
+              </div>
+            </div>
+          </div>
+        </div>
+
         {/* Prompt */}
         <div className="mb-4">
           <div className="flex items-center justify-between mb-1">
