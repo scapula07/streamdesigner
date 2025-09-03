@@ -2,15 +2,29 @@ import React, { useEffect, useRef, useState } from "react";
 import { MdCloudUpload } from "react-icons/md";
 import { fabric } from "fabric";
 
+import { ToolType } from "../Toolbar";
+
 type Workspace = {
-  // expected to contain the whip endpoint (string). Adjust if your workspace structure differs.
   whip_url: string;
 };
-export default function CanvasDefault({ workspace }: { workspace: Workspace }) {
+
+interface CanvasDefaultProps {
+  workspace: Workspace;
+  activeTool: ToolType;
+  brushColor?: string;
+  brushWidth?: number;
+}
+
+export default function CanvasDefault({ 
+  workspace, 
+  activeTool = 'select',
+  brushColor = '#000000',
+  brushWidth = 5 
+}: CanvasDefaultProps) {
   const inputRef = useRef<HTMLInputElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
-  const fabricRef = useRef<fabric.StaticCanvas | null>(null);
+  const fabricRef = useRef<fabric.Canvas | null>(null);
 
   // WebRTC / streaming refs
   const pcRef = useRef<RTCPeerConnection | null>(null);
@@ -42,8 +56,24 @@ export default function CanvasDefault({ workspace }: { workspace: Workspace }) {
     }
     setError(null);
     setFileType(file.type);
-    const url = URL.createObjectURL(file);
-    setFileUrl(url);
+
+    // For images, read the file directly instead of creating a blob URL
+    if (file.type.startsWith("image/")) {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        if (e.target?.result) {
+          setFileUrl(e.target.result as string);
+        }
+      };
+      reader.onerror = () => {
+        setError("Failed to read file");
+      };
+      reader.readAsDataURL(file);
+    } else {
+      // For videos, we still need to use blob URL
+      const url = URL.createObjectURL(file);
+      setFileUrl(url);
+    }
 
     // small delay to allow canvas to draw then start streaming if desired
     // but we won't auto-start streaming here; user must press Start Stream button
@@ -53,17 +83,39 @@ export default function CanvasDefault({ workspace }: { workspace: Workspace }) {
     if (e.target.files && e.target.files[0]) handleFile(e.target.files[0]);
   };
 
-  const handleUrlInput = (e: React.KeyboardEvent<HTMLInputElement>) => {
+  const handleUrlInput = async (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === "Enter") {
       const url = (e.target as HTMLInputElement).value.trim();
       if (!url) return;
-      if (!url.match(/\.(jpeg|jpg|png|gif|webp|mp4|webm)$/i)) {
-        setError("URL must point to an image or video (jpeg/jpg/png/gif/webp/mp4/webm).");
-        return;
+      
+      try {
+        setError(null);
+        setStreamLoading(true);
+        
+        // For Firebase Storage or other problematic URLs, fetch first
+        if (url.includes('firebasestorage.googleapis.com') || url.includes('alt=media')) {
+          const response = await fetch(url);
+          if (!response.ok) throw new Error('Failed to fetch image');
+          
+          const blob = await response.blob();
+          const blobUrl = URL.createObjectURL(blob);
+          setFileUrl(blobUrl);
+          setFileType(blob.type || "image/png");
+          return;
+        }
+        
+        // Handle regular URLs with extensions
+        if (!url.match(/\.(jpeg|jpg|png|gif|webp|mp4|webm)$/i)) {
+          throw new Error("URL must point to an image or video (jpeg/jpg/png/gif/webp/mp4/webm).");
+        }
+        
+        setFileUrl(url);
+        setFileType(url.match(/\.(mp4|webm)$/i) ? "video/mp4" : "image/png");
+      } catch (err: any) {
+        setError(err.message || "Failed to load image");
+      } finally {
+        setStreamLoading(false);
       }
-      setError(null);
-      setFileUrl(url);
-      setFileType(url.match(/\.(mp4|webm)$/i) ? "video/mp4" : "image/png");
     }
   };
 
@@ -91,58 +143,87 @@ export default function CanvasDefault({ workspace }: { workspace: Workspace }) {
     const canvas = canvasRef.current;
     if (!canvas) return;
 
-    // Initialize fabric.js StaticCanvas if not already
+    // Initialize fabric.js Canvas if not already
     if (!fabricRef.current) {
-      fabricRef.current = new fabric.StaticCanvas(canvas, {
-        backgroundColor: '#fff',
-        width: 350,
-        height: 350,
-        renderOnAddRemove: true,
-      });
+      fabricRef.current = new fabric.Canvas(canvas);
+      fabricRef.current.setWidth(350);
+      fabricRef.current.setHeight(350);
+      fabricRef.current.setBackgroundColor('#fff', fabricRef.current.renderAll.bind(fabricRef.current));
+      fabricRef.current.renderOnAddRemove = true;
+      fabricRef.current.selection = activeTool === 'select';
+      fabricRef.current.isDrawingMode = activeTool === 'brush' || activeTool === 'pencil';
     }
     const fabricCanvas = fabricRef.current;
 
     // Helper to clear fabric and set size
     const resetFabric = (w: number, h: number) => {
+      const bgImage = fabricCanvas.backgroundImage;
       fabricCanvas.clear();
       fabricCanvas.setWidth(w);
       fabricCanvas.setHeight(h);
-      fabricCanvas.setBackgroundColor('#fff', fabricCanvas.renderAll.bind(fabricCanvas));
+      if (bgImage) {
+        fabricCanvas.setBackgroundImage(bgImage, fabricCanvas.renderAll.bind(fabricCanvas));
+      } else {
+        fabricCanvas.setBackgroundColor('#fff', fabricCanvas.renderAll.bind(fabricCanvas));
+      }
     };
 
     let intervalId: NodeJS.Timeout | null = null;
     let rafId = 0;
 
     if (fileUrl && fileType && fileType.startsWith("image/")) {
-      const img = new window.Image();
-      img.crossOrigin = "anonymous";
-      img.onload = () => {
-        // Responsive max size: fit within parent, but never exceed 90vw/70vh
+      console.log("Loading image from URL:", fileUrl);
+
+      // Load image using fabric.js with crossOrigin
+      fabric.Image.fromURL(fileUrl, (fabricImg) => {
+        if (!fabricImg) {
+          console.error("Failed to load image");
+          setError("Failed to load image");
+          return;
+        }
+
+        const imgWidth = fabricImg.width || 350;
+        const imgHeight = fabricImg.height || 350;
+        console.log("Image loaded successfully", { width: imgWidth, height: imgHeight });
+
+        // Calculate dimensions maintaining aspect ratio
         const maxW = Math.min(700, window.innerWidth * 0.9);
         const maxH = Math.min(500, window.innerHeight * 0.7);
-        let w = img.width;
-        let h = img.height;
-        if (w > maxW || h > maxH) {
-          const scale = Math.min(maxW / w, maxH / h);
-          w = Math.round(w * scale);
-          h = Math.round(h * scale);
+        let finalWidth = imgWidth;
+        let finalHeight = imgHeight;
+
+        // Scale down if image is too large
+        if (imgWidth > maxW || imgHeight > maxH) {
+          const scaleW = maxW / imgWidth;
+          const scaleH = maxH / imgHeight;
+          const scale = Math.min(scaleW, scaleH);
+          finalWidth = Math.round(imgWidth * scale);
+          finalHeight = Math.round(imgHeight * scale);
+          console.log("Scaling image to fit", { finalWidth, finalHeight });
         }
-        resetFabric(w, h);
-        fabric.Image.fromURL(fileUrl, (fabricImg) => {
-          fabricImg.set({ left: 0, top: 0, selectable: false, evented: false });
-          fabricImg.scaleToWidth(w);
-          fabricImg.scaleToHeight(h);
-          fabricCanvas.add(fabricImg);
-          fabricCanvas.renderAll();
-        }, { crossOrigin: 'anonymous' });
-        // Redraw every second to keep stream active
+
+        // Clear canvas and set new dimensions
+        fabricCanvas.clear();
+        fabricCanvas.setDimensions({ width: finalWidth, height: finalHeight });
+
+        // Scale image proportionally using width
+        fabricImg.scaleToWidth(finalWidth, true);
+        console.log("Final image scale", { 
+          scaleX: fabricImg.scaleX, 
+          scaleY: fabricImg.scaleY 
+        });
+
+        // Set as background image
+        fabricCanvas.setBackgroundImage(fabricImg, fabricCanvas.renderAll.bind(fabricCanvas), {
+          originX: 'left',
+          originY: 'top'
+        });
+
+        // Setup interval for stream
         intervalId = setInterval(() => fabricCanvas.renderAll(), 1000);
-      };
-      img.onerror = () => setError("Failed to load image.");
-      img.src = fileUrl;
-      return () => {
-        if (intervalId) clearInterval(intervalId);
-      };
+      }, { 
+        crossOrigin: 'anonymous'  // Always set crossOrigin for remote images
+      });
     }
 
     if (fileUrl && fileType && fileType.startsWith("video/")) {
@@ -177,12 +258,16 @@ export default function CanvasDefault({ workspace }: { workspace: Workspace }) {
           tctx.clearRect(0, 0, w, h);
           tctx.drawImage(video, 0, 0, w, h);
           fabric.Image.fromURL(temp.toDataURL(), (fabricImg) => {
-            fabricImg.set({ left: 0, top: 0, selectable: false, evented: false });
-            fabricImg.scaleToWidth(w);
-            fabricImg.scaleToHeight(h);
+            fabricImg.set({
+              left: 0,
+              top: 0,
+              selectable: false,
+              evented: false,
+              scaleX: w / video.videoWidth,
+              scaleY: h / video.videoHeight
+            });
             fabricCanvas.clear();
-            fabricCanvas.add(fabricImg);
-            fabricCanvas.renderAll();
+            fabricCanvas.setBackgroundImage(fabricImg, fabricCanvas.renderAll.bind(fabricCanvas));
           });
         }
         rafId = requestAnimationFrame(drawFrame);
@@ -401,8 +486,8 @@ export default function CanvasDefault({ workspace }: { workspace: Workspace }) {
   // Cleanup on unmount
   useEffect(() => {
     return () => {
-      // revoke object URL if created locally
-      if (fileUrl && fileUrl.startsWith("blob:")) {
+      // revoke object URL if it's a blob URL (used for videos)
+      if (fileUrl && fileUrl.startsWith("blob:") && fileType?.startsWith("video/")) {
         URL.revokeObjectURL(fileUrl);
       }
       // stop streaming if active
@@ -413,14 +498,77 @@ export default function CanvasDefault({ workspace }: { workspace: Workspace }) {
 
   // --- Simple UI to remove loaded file ---
   const removeFile = () => {
-    if (fileUrl && fileUrl.startsWith("blob:")) URL.revokeObjectURL(fileUrl);
+    // Only revoke blob URLs for videos
+    if (fileUrl && fileUrl.startsWith("blob:") && fileType?.startsWith("video/")) {
+      URL.revokeObjectURL(fileUrl);
+    }
     setFileUrl(null);
     setFileType(null);
-    // clear fabric canvas
-    // if (fabricRef.current) {
-    //   fabricRef.current.clear();
-    //   fabricRef.current.setBackgroundColor('#fff', fabricRef.current.renderAll.bind(fabricRef.current));
-    // }
+    
+    // Reset canvas to default state
+    if (fabricRef.current) {
+      fabricRef.current.clear();
+      fabricRef.current.setWidth(350);
+      fabricRef.current.setHeight(350);
+      fabricRef.current.setBackgroundColor('#fff', fabricRef.current.renderAll.bind(fabricRef.current));
+      fabricRef.current.renderAll();
+    }
+  };
+
+  // Handle tool changes
+  useEffect(() => {
+    const canvas = fabricRef.current;
+    if (!canvas) return;
+
+    canvas.isDrawingMode = activeTool === 'brush' || activeTool === 'pencil';
+    canvas.selection = activeTool === 'select';
+
+    if (canvas.isDrawingMode) {
+      // Create brush based on tool type
+      if (activeTool === 'brush') {
+        canvas.freeDrawingBrush = new fabric.PencilBrush(canvas);
+        canvas.freeDrawingBrush.width = brushWidth;
+        canvas.freeDrawingBrush.color = brushColor;
+      } else if (activeTool === 'pencil') {
+        canvas.freeDrawingBrush = new fabric.PencilBrush(canvas);
+        canvas.freeDrawingBrush.width = brushWidth * 0.5; // Thinner for pencil
+        canvas.freeDrawingBrush.color = brushColor;
+      }
+
+      // Set brush properties
+      if (canvas.freeDrawingBrush) {
+        canvas.freeDrawingBrush.strokeLineCap = activeTool === 'brush' ? 'round' : 'square';
+        canvas.freeDrawingBrush.strokeLineJoin = activeTool === 'brush' ? 'round' : 'miter';
+      }
+    }
+
+    // Update cursor based on tool
+    canvas.defaultCursor = activeTool === 'select' ? 'default' : 'crosshair';
+    canvas.hoverCursor = activeTool === 'select' ? 'move' : 'crosshair';
+
+  }, [activeTool, brushColor, brushWidth]);
+
+  // Helper function to safely perform canvas operations
+  const withCanvas = (callback: (canvas: fabric.Canvas) => void) => {
+    const canvas = fabricRef.current;
+    if (canvas) {
+      callback(canvas);
+    }
+  };
+
+  // Reset canvas to specified dimensions
+  const resetCanvas = (w: number, h: number) => {
+    withCanvas(canvas => {
+      const bgImage = canvas.backgroundImage;
+      canvas.clear();
+      canvas.setWidth(w);
+      canvas.setHeight(h);
+      if (bgImage) {
+        canvas.setBackgroundImage(bgImage, canvas.renderAll.bind(canvas));
+      } else {
+        canvas.setBackgroundColor('#fff', canvas.renderAll.bind(canvas));
+      }
+    });
   };
 
   return (

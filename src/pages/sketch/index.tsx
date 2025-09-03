@@ -1,7 +1,10 @@
 import React, { useState, useEffect } from "react";
+import Head from "next/head";
+import dynamic from "next/dynamic";
+import { updatePrompt } from "@/lib/api";
+import Toolbar, { ToolType } from "@/components/Sketch/Toolbar";
 import { useRouter } from 'next/router';
 import { workspaceApi } from '@/firebase/workspace';
-import Toolbar from "@/components/Sketch/Toolbar";
 import Navbar from "@/components/Sketch/Navbar";
 import CanvasDefault from "@/components/Sketch/canvas/CanvasDefault";
 import Scene from "@/components/Sketch/Scene";
@@ -11,7 +14,6 @@ import { FiSettings, FiX } from "react-icons/fi";
 import { userStore } from "@/recoil";
 import { useRecoilValue } from "recoil";
 
-
 export default function Sketch() {
   const [prompt, setPrompt] = useState("");
   const [creativity, setCreativity] = useState(60);
@@ -19,6 +21,14 @@ export default function Sketch() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [workspace, setWorkspace] = useState<any>(null);
   const [wsLoading, setWsLoading] = useState(true);
+  const [isGenerating, setIsGenerating] = useState(false);
+  
+  // Canvas tool states
+  const [activeTool, setActiveTool] = useState<ToolType>("select");
+  const [brushColor, setBrushColor] = useState("#000000");
+  const [brushSize, setBrushSize] = useState(5);
+  const [canUndo, setCanUndo] = useState(false);
+  const [canRedo, setCanRedo] = useState(false);
   const user = useRecoilValue(userStore) as { email: string } ;
   const router = useRouter();
   const { workspaceId } = router.query;
@@ -38,7 +48,21 @@ export default function Sketch() {
     return <div className="flex items-center justify-center min-h-screen text-red-500">Workspace not found.</div>;
   }
 
+  const handleToolChange = (tool: ToolType) => {
+    setActiveTool(tool);
+  };
 
+  const handleUndo = () => {
+    // TODO: Implement undo
+  };
+
+  const handleRedo = () => {
+    // TODO: Implement redo
+  };
+
+  const handleClear = () => {
+    // TODO: Implement clear
+  };
 
   return (
     <div className="min-h-screen bg-gray-100 flex flex-col">
@@ -48,12 +72,25 @@ export default function Sketch() {
       {/* Main Content */}
       <main className="flex-1 flex flex-row gap-4 p-6 relative overflow-x-hidden">
         {/* Left Pane: Toolbar */}
-        <Toolbar />
+        <Toolbar 
+          activeTool={activeTool}
+          onToolChange={handleToolChange}
+          onUndo={handleUndo}
+          onRedo={handleRedo}
+          onClear={handleClear}
+          canUndo={canUndo}
+          canRedo={canRedo}
+        />
         {/* Middle: Sketch/Canvas Area */}
         <section className="flex-1 bg-white rounded-lg shadow flex flex-col">
           {/* Canvas Area */}
           <div className="flex-1 flex items-center justify-center bg-blue-50 relative">
-            <CanvasDefault workspace={workspace}/>
+            <CanvasDefault 
+              workspace={workspace}
+              activeTool={activeTool}
+              brushColor={brushColor}
+              brushWidth={brushSize}
+            />
           </div>
         </section>
 
@@ -81,7 +118,49 @@ export default function Sketch() {
                 className="w-40 accent-indigo-500"
               />
               <span className="text-xs text-gray-500">{creativity}</span>
-              <button className="ml-auto px-4 py-2 bg-indigo-600 text-white rounded hover:bg-indigo-700 transition">Generate</button>
+              <button 
+                onClick={async () => {
+                  if (!prompt.trim()) return;
+                  setIsGenerating(true);
+                  try {
+                    await updatePrompt(workspace?.stream_id,{prompt});
+                  } catch (error) {
+                    console.error('Error updating prompt:', error);
+                  } finally {
+                    setIsGenerating(false);
+                  }
+                }}
+                disabled={isGenerating || !prompt.trim()}
+                className={`ml-auto px-4 py-2 text-white rounded transition flex items-center gap-2
+                  ${isGenerating || !prompt.trim() 
+                    ? 'bg-indigo-400 cursor-not-allowed' 
+                    : 'bg-indigo-600 hover:bg-indigo-700'
+                  }`}
+              >
+                {isGenerating ? (
+                  <>
+                    <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24">
+                      <circle 
+                        className="opacity-25" 
+                        cx="12" 
+                        cy="12" 
+                        r="10" 
+                        stroke="currentColor" 
+                        strokeWidth="4"
+                        fill="none"
+                      />
+                      <path 
+                        className="opacity-75" 
+                        fill="currentColor"
+                        d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                      />
+                    </svg>
+                    Generating...
+                  </>
+                ) : (
+                  'Generate'
+                )}
+              </button>
             </div>
           </div>
         </section>
@@ -114,7 +193,20 @@ export default function Sketch() {
             </button>
           </div>
           <div className="h-[calc(100%-48px)] overflow-y-auto">
-            <Settings />
+            <Settings 
+              workspaceId={workspaceId as string} 
+              onUpdateSettings={async (params) => {
+                console.log(params,"updating")
+                // try {
+                //   await updatePrompt(
+                //     workspace?.stream_id,
+                //     { ...params }
+                //   );
+                // } catch (error) {
+                //   console.error('Error updating prompt settings:', error);
+                // }
+              }}
+            />
           </div>
         </div>
       </main>

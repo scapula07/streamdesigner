@@ -1,13 +1,28 @@
 import React, { useState, useRef, useEffect } from "react";
-import { getStreamStatusV2 } from "@/lib/api";
+import { getStreamStatusV2,updatePrompt } from "@/lib/api";
 
 export default function RightPanel({workspace}: {workspace: any}) {
   const [expanded, setExpanded] = useState(false);
   const [controlNetsExpanded, setControlNetsExpanded] = useState(false);
+  const [prompt, setPrompt] = useState("photorealistic bag with green color");
+  const [isGenerating, setIsGenerating] = useState(false);
   const panelRef = useRef<HTMLDivElement>(null);
   const [panelLeft, setPanelLeft] = useState<number | null>(null);
   const iframeHeight = 200;
   const iframeWidth = '100%';
+
+  const handleGenerate = async () => {
+    if (!prompt.trim() || isGenerating || !workspace?.id) return;
+    
+    setIsGenerating(true);
+    try {
+        await updatePrompt(workspace.stream_id, {prompt:prompt});
+    } catch (error) {
+      console.error('Error updating prompt:', error);
+    } finally {
+      setIsGenerating(false);
+    }
+  };
 
   // --- Stream status polling (copied from Preview) ---
   const [streamStatus, setStreamStatus] = useState<any>(null);
@@ -294,7 +309,13 @@ export default function RightPanel({workspace}: {workspace: any}) {
             <label className="block text-xs text-gray-500 font-medium">Prompt</label>
             <button className="text-xs text-indigo-500 font-semibold">Describe</button>
           </div>
-          <textarea className="w-full bg-gray-50 border border-gray-200 rounded-xl p-3 text-gray-900 text-sm focus:ring-2 focus:ring-indigo-500 outline-none resize-none" rows={3} defaultValue="photorealistic bag with green color" />
+          <textarea 
+            className="w-full bg-gray-50 border border-gray-200 rounded-xl p-3 text-gray-900 text-sm focus:ring-2 focus:ring-indigo-500 outline-none resize-none" 
+            rows={3} 
+            value={prompt}
+            onChange={(e) => setPrompt(e.target.value)}
+            placeholder="Enter your prompt here..."
+          />
         </div>
         {/* Palette */}
         <div className="mb-4">
@@ -342,7 +363,24 @@ export default function RightPanel({workspace}: {workspace: any}) {
           </div>
         </div>
         {/* Generate Button */}
-        <button className="w-full py-3 rounded-xl bg-indigo-600 text-white font-semibold text-base hover:bg-indigo-700 transition mt-2">Generate</button>
+        <button 
+          onClick={handleGenerate}
+          disabled={isGenerating || !prompt.trim()}
+          className={`w-full py-3 rounded-xl text-white font-semibold text-base transition mt-2 flex items-center justify-center gap-2
+            ${isGenerating || !prompt.trim() ? 'bg-indigo-400 cursor-not-allowed' : 'bg-indigo-600 hover:bg-indigo-700'}`}
+        >
+          {isGenerating ? (
+            <>
+              <svg className="animate-spin h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+              </svg>
+              Generating...
+            </>
+          ) : (
+            'Generate'
+          )}
+        </button>
       </div>
     </aside>
   );

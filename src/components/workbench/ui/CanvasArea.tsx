@@ -1,8 +1,23 @@
-import React, { useEffect, useRef, useState } from "react";
-
+import React, { useEffect, useRef, useState, useCallback } from "react";
 import { fabric } from "fabric";
 import { MdCloudUpload } from "react-icons/md";
+import ToolbarSecondary from "./ToolbarSecondary";
 import Toolbar from "./Toolbar";
+import { debounce } from 'lodash';
+
+// Helper function to get container dimensions accounting for padding
+const getContainerDimensions = (container: HTMLDivElement) => {
+  const style = window.getComputedStyle(container);
+  const paddingLeft = parseInt(style.paddingLeft, 10);
+  const paddingRight = parseInt(style.paddingRight, 10);
+  const paddingTop = parseInt(style.paddingTop, 10);
+  const paddingBottom = parseInt(style.paddingBottom, 10);
+
+  return {
+    width: container.clientWidth - (paddingLeft + paddingRight),
+    height: container.clientHeight - (paddingTop + paddingBottom)
+  };
+};
 // Add Workspace type for whip_url
 type Workspace = {
   whip_url: string;
@@ -38,6 +53,7 @@ type MenuState = {
   const containerRef = useRef<HTMLDivElement | null>(null);
   // No need for imageRegion
   const [dragActive, setDragActive] = useState(false);
+  const [hasObjects, setHasObjects] = useState(false);
   // Streaming state/refs
   const [stream, setStream] = useState<MediaStream | null>(null);
   const [streaming, setStreaming] = useState(false);
@@ -66,9 +82,15 @@ type MenuState = {
   // Combine canvas initialization and menu event wiring
   useEffect(() => {
     if (!containerRef.current) return;
-    // Initialize Fabric.js canvas
+
+    // Get initial dimensions from container
+    const { width, height } = getContainerDimensions(containerRef.current);
+    
+    // Initialize Fabric.js canvas with correct dimensions
     const canvas = new fabric.Canvas("fabricCanvas", {
       backgroundColor: "#fff",
+      width,
+      height,
       selection: true,
       selectionBorderColor: '#6366f1',
       selectionLineWidth: 2,
@@ -96,19 +118,31 @@ type MenuState = {
       obj.selectable = true;
       obj.evented = true;
     });
-    // Responsive resize logic
-    const resizeCanvas = () => {
+    // Responsive resize logic with better handling
+    const resizeCanvas = debounce(() => {
       const container = containerRef.current;
-      if (container) {
-        const width = container.clientWidth;
-        const height = container.clientHeight;
-        canvas.setWidth(width);
-        canvas.setHeight(height);
-        canvas.requestRenderAll();
+      if (!container || !canvas) return;
+
+      const { width, height } = getContainerDimensions(container);
+      
+      // Update canvas dimensions
+      canvas.setDimensions({ width, height });
+
+      // Scale content to fit new dimensions if needed
+      if (imageLoaded) {
+        const bg = canvas.backgroundImage as fabric.Image;
+        if (bg && bg.width && bg.height) {
+          const scale = Math.min(width / bg.width, height / bg.height);
+          bg.scale(scale);
+        }
       }
-    };
-    resizeCanvas();
-    window.addEventListener('resize', resizeCanvas);
+
+      canvas.requestRenderAll();
+    }, 250);
+
+    // Set up ResizeObserver for more reliable resize detection
+    const resizeObserver = new ResizeObserver(resizeCanvas);
+    resizeObserver.observe(containerRef.current);
     canvasRef.current = canvas;
 
     // --- Context menu event wiring ---
@@ -212,7 +246,7 @@ type MenuState = {
         canvasEl.removeEventListener('contextmenu', handleContextMenu);
       }
       document.removeEventListener('mousedown', handleDocumentClick);
-      window.removeEventListener('resize', resizeCanvas);
+      resizeObserver.disconnect();
       try {
         canvas.dispose();
       } catch (err) {
@@ -360,22 +394,71 @@ type MenuState = {
     if (!file) return;
     const reader = new FileReader();
     reader.onload = (e) => {
-      const data = e.target?.result as string;
-      fabric.Image.fromURL(data, (img: any) => {
-        const canvas = canvasRef.current;
-        if (!canvas) return;
-        // Resize canvas to fit image exactly
-        canvas.setWidth(img.width);
-        canvas.setHeight(img.height);
-        // Set as background image (always behind shapes)
-        canvas.setBackgroundImage(img, canvas.renderAll.bind(canvas), {
-          scaleX: 1,
-          scaleY: 1,
-          left: 0,
-          top: 0,
+      try {
+        const data = e.target?.result as string;
+        if (!data) {
+          console.error('Failed to load image data');
+          return;
+        }
+
+        fabric.Image.fromURL(data, (img: fabric.Image) => {
+          try {
+            const canvas = canvasRef.current;
+            if (!canvas) {
+              console.error('Canvas not initialized');
+              return;
+            }
+            
+            // Get container dimensions
+            const container = containerRef.current;
+            if (!container) {
+              console.error('Container not initialized');
+              return;
+            }
+            
+            const { width: containerWidth, height: containerHeight } = getContainerDimensions(container);
+            
+            if (!img.width || !img.height) {
+              console.error('Invalid image dimensions');
+              return;
+            }
+            
+            // Calculate scale to fit image within container while maintaining aspect ratio
+            const scale = Math.min(
+              containerWidth / img.width,
+              containerHeight / img.height
+            );
+            
+            // Update canvas size to container size
+            canvas.setDimensions({
+              width: containerWidth,
+              height: containerHeight
+            });
+            
+            // Set as background image with proper scaling
+            canvas.setBackgroundImage(img, canvas.renderAll.bind(canvas), {
+              scaleX: scale,
+              scaleY: scale,
+              left: (containerWidth - img.width * scale) / 2,
+              top: (containerHeight - img.height * scale) / 2,
+            });
+            
+            setImageLoaded(true);
+            setHasObjects(true);
+            console.log('Image loaded successfully:', {
+              imageSize: { width: img.width, height: img.height },
+              containerSize: { width: containerWidth, height: containerHeight },
+              scale
+            });
+          } catch (err) {
+            console.error('Error setting up image:', err);
+          }
+        }, {
+          crossOrigin: 'anonymous'
         });
-        setImageLoaded(true);
-      });
+      } catch (err) {
+        console.error('Error in reader onload:', err);
+      }
     };
     reader.readAsDataURL(file);
   };
@@ -478,10 +561,6 @@ type MenuState = {
     setError(null);
     if (!workspace?.whip_url) {
       setError("No WHIP URL configured on workspace.");
-      return;
-    }
-    if (!imageLoaded) {
-      setError("No image loaded to stream.");
       return;
     }
     setStreamLoading(true);
@@ -592,10 +671,12 @@ type MenuState = {
 
   // --- Effect: respond to toolbar Stream button ---
   useEffect(() => {
-    if (active === "Stream" && !streaming && !streamLoading) {
-      startStreaming();
-    } else if (active !== "Stream" && streaming) {
-      stopStreaming();
+    if (active === "Stream") {
+      if (!streaming && !streamLoading) {
+        startStreaming();
+      } else if (streaming) {
+        stopStreaming();
+      }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [active]);
@@ -857,10 +938,17 @@ type MenuState = {
     // Save initial state
     saveCanvasState();
 
+    // Function to check if canvas has objects
+    const updateObjectsState = () => {
+      const objects = canvas.getObjects();
+      setHasObjects(objects.length > 0 || !!canvas.backgroundImage);
+    };
+
     // Listen for various modification events
     const saveState = () => {
       console.log('Canvas modification detected');
       saveCanvasState();
+      updateObjectsState();
     };
 
     canvas.on('object:modified', saveState);
@@ -886,16 +974,45 @@ type MenuState = {
   }, []);
   
 
+  // Before the return statement
+  const handleStreamToggle = useCallback(() => {
+      console.log('Stream toggle clicked, current state:', { streaming, streamLoading });
+    if (streaming) {
+      console.log('Stopping stream from toggle');
+      setStreaming(false);
+      stopStreaming();
+    } else {
+      console.log('Starting stream from toggle');
+      startStreaming();
+    }
+  }, [streaming, startStreaming, stopStreaming]);
+
+  useEffect(() => {
+    console.log('Streaming state changed:', { streaming, streamLoading });
+  }, [streaming, streamLoading]);
+
   return (
-    <>
-      <Toolbar
-        workspace={workspace}
-        active={active}
-        setActive={setActive}
-        imageLoaded={imageLoaded}
-        onShapeAdd={handleAddShape}
-        onAddText={handleAddText}
-      />
+    <div className="flex flex-col h-full">
+      <div className="relative">
+        <Toolbar
+          workspace={workspace}
+          active={active}
+          setActive={setActive}
+          imageLoaded={imageLoaded}
+          onShapeAdd={handleAddShape}
+          onAddText={handleAddText}
+          isStreaming={streaming}
+          onStreamToggle={handleStreamToggle}
+        />
+        {hasObjects && (
+          <ToolbarSecondary
+            active={active}
+            setActive={setActive}
+            isStreaming={streaming}
+            onStreamToggle={handleStreamToggle}
+          />
+        )}
+      </div>
       <div
         ref={containerRef}
         style={{
@@ -1056,7 +1173,53 @@ type MenuState = {
           </div>
         )}
 
-        {!imageLoaded && (!canvasRef.current?.getObjects().length) && (
+        {/* Secondary Toolbar */}
+        {hasObjects && (
+          <div className="absolute left-[260px] top-4 bg-white border border-gray-200 rounded-lg shadow-lg p-2 flex items-center gap-2">
+            <button
+              onClick={() => handleAddShape('rect')}
+              className="flex items-center justify-center w-8 h-8 rounded hover:bg-gray-50 transition-colors"
+              title="Add Rectangle"
+            >
+              <svg width="20" height="20" fill="none" viewBox="0 0 24 24">
+                <rect x="4" y="4" width="16" height="16" rx="2" stroke="currentColor" strokeWidth="2"/>
+              </svg>
+            </button>
+            <button
+              onClick={() => handleAddShape('circle')}
+              className="flex items-center justify-center w-8 h-8 rounded hover:bg-gray-50 transition-colors"
+              title="Add Circle"
+            >
+              <svg width="20" height="20" fill="none" viewBox="0 0 24 24">
+                <circle cx="12" cy="12" r="8" stroke="currentColor" strokeWidth="2"/>
+              </svg>
+            </button>
+            <button
+              onClick={handleAddText}
+              className="flex items-center justify-center w-8 h-8 rounded hover:bg-gray-50 transition-colors"
+              title="Add Text"
+            >
+              <svg width="20" height="20" fill="none" viewBox="0 0 24 24">
+                <path d="M4 7h16M12 7v10m-4 0h8" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
+              </svg>
+            </button>
+            <div className="w-px h-6 bg-gray-200 mx-1"></div>
+            <button
+              onClick={() => setActive(active === 'Draw' ? '' : 'Draw')}
+              className={`flex items-center justify-center w-8 h-8 rounded ${
+                active === 'Draw' ? 'bg-indigo-50 text-indigo-600' : 'hover:bg-gray-50'
+              } transition-colors`}
+              title="Draw"
+            >
+              <svg width="20" height="20" fill="none" viewBox="0 0 24 24">
+                <path d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" 
+                  stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
+              </svg>
+            </button>
+          </div>
+        )}
+
+        {!hasObjects && (
           <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-20">
             <div
               className={`bg-white px-8 py-8 rounded-2xl shadow-xl min-w-[320px] max-w-[360px] flex flex-col items-center  transition-all duration-200 pointer-events-auto ${
@@ -1089,7 +1252,7 @@ type MenuState = {
           </div>
         )}
       </div>
-    </>
+    </div>
   );
 }
 

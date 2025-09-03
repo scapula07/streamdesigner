@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { getStreamStatusV2 } from "@/lib/api";
+import { getStreamStatusV2,updatePrompt } from "@/lib/api";
 interface PreviewProps {
   activeTab: string;
 }

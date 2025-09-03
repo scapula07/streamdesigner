@@ -12,6 +12,7 @@
     "axios": "^1.11.0",
     "fabric": "^5.5.2",
     "firebase": "^12.1.0",
+    "lodash": "^4.17.21",
     "next": "15.5.0",
     "nodemailer": "^7.0.5",
     "nprogress": "^0.2.0",
@@ -23,6 +24,7 @@
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
     "@types/fabric": "^5.3.10",
+    "@types/lodash": "^4.17.20",
     "@types/node": "^20",
     "@types/nodemailer": "^7.0.1",
     "@types/react": "^19",

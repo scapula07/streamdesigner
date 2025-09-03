@@ -28,7 +28,7 @@ export async function createStream() {
 }
 
 export async function updatePrompt(streamId: string, payload: any) {
-    console.log('Updating prompt with payload:', payload,streamId);
+    console.log('Updating prompt with payload:', {params:payload},streamId);
   try {
     const res = await axios.post(
       `${PROMPT_API_URL}/streams/${streamId}/prompts`,
